@@ -76,7 +76,7 @@ def generate_caption(image_path: str) -> str:
         image_data = f.read()
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
+        model="gemini-1.5-flash-latest",
         contents=[
             types.Part.from_bytes(data=image_data, mime_type=mime_type),
             """この犬の写真を見て、Threadsに投稿する文章を日本語で1つ書いてください。
@@ -110,25 +110,31 @@ def post_to_threads(image_url: str, caption: str):
 
     # Step1: メディアコンテナを作成
     container_url = f"https://graph.threads.net/v1.0/{user_id}/threads"
-    container_res = requests.post(container_url, data={
-        "media_type": "IMAGE",
-        "image_url": image_url,
-        "text": caption,
-        "access_token": token
-    })
+    container_res = requests.post(
+        container_url,
+        params={"access_token": token},
+        json={
+            "media_type": "IMAGE",
+            "image_url": image_url,
+            "text": caption
+        }
+    )
+    print(f"コンテナレスポンス: {container_res.status_code} {container_res.text}")
     container_res.raise_for_status()
     container_id = container_res.json()["id"]
     print(f"コンテナ作成完了: {container_id}")
 
     # Step2: 処理待ち
-    time.sleep(5)
+    time.sleep(10)
 
     # Step3: 投稿を公開
     publish_url = f"https://graph.threads.net/v1.0/{user_id}/threads_publish"
-    publish_res = requests.post(publish_url, data={
-        "creation_id": container_id,
-        "access_token": token
-    })
+    publish_res = requests.post(
+        publish_url,
+        params={"access_token": token},
+        json={"creation_id": container_id}
+    )
+    print(f"公開レスポンス: {publish_res.status_code} {publish_res.text}")
     publish_res.raise_for_status()
     print(f"Threads投稿完了！ ID: {publish_res.json()['id']}")
 
