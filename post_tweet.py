@@ -1,4 +1,3 @@
-import anthropic
 import tweepy
 import base64
 import json
@@ -6,6 +5,7 @@ import os
 from datetime import datetime
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
+import google.generativeai as genai
 
 # --- 設定 ---
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
@@ -56,44 +56,31 @@ def move_to_posted(drive, file_id: str):
     ).execute()
     print("投稿済みフォルダに移動しました")
 
-# --- Claudeで文章生成 ---
+# --- Geminiで文章生成 ---
 def generate_tweet(image_path: str) -> str:
-    claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
     ext = image_path.split(".")[-1].lower()
-    media_type = "image/png" if ext == "png" else "image/jpeg"
+    mime_type = "image/png" if ext == "png" else "image/jpeg"
 
     with open(image_path, "rb") as f:
-        image_data = base64.b64encode(f.read()).decode("utf-8")
+        image_data = f.read()
 
-    response = claude.messages.create(
-        model="claude-opus-4-5",
-        max_tokens=300,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": media_type,
-                        "data": image_data
-                    }
-                },
-                {
-                    "type": "text",
-                    "text": """この犬の写真を見て、Xでバズりやすいツイート文章を日本語で1つ作成してください。
+    response = model.generate_content([
+        {
+            "mime_type": mime_type,
+            "data": image_data
+        },
+        """この犬の写真を見て、Xでバズりやすいツイート文章を日本語で1つ作成してください。
 条件：
 - 140文字以内
 - 絵文字を適度に使う
 - 犬好きの心をつかむ表現
 - ハッシュタグを2〜3個（#犬 #いぬのいる生活 など）
 - 文章のみ返答してください"""
-                }
-            ]
-        }]
-    )
-    return response.content[0].text
+    ])
+    return response.text
 
 # --- Xに投稿 ---
 def post_to_x(image_path: str, text: str):

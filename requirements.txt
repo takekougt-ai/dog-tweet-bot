@@ -1,4 +1,4 @@
-anthropic
 tweepy
 google-api-python-client
 google-auth
+google-generativeai
