@@ -1,11 +1,11 @@
 import tweepy
-import base64
 import json
 import os
 from datetime import datetime
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # --- 設定 ---
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
@@ -58,8 +58,7 @@ def move_to_posted(drive, file_id: str):
 
 # --- Geminiで文章生成 ---
 def generate_tweet(image_path: str) -> str:
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
     ext = image_path.split(".")[-1].lower()
     mime_type = "image/png" if ext == "png" else "image/jpeg"
@@ -67,19 +66,19 @@ def generate_tweet(image_path: str) -> str:
     with open(image_path, "rb") as f:
         image_data = f.read()
 
-    response = model.generate_content([
-        {
-            "mime_type": mime_type,
-            "data": image_data
-        },
-        """この犬の写真を見て、Xでバズりやすいツイート文章を日本語で1つ作成してください。
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=[
+            types.Part.from_bytes(data=image_data, mime_type=mime_type),
+            """この犬の写真を見て、Xでバズりやすいツイート文章を日本語で1つ作成してください。
 条件：
 - 140文字以内
 - 絵文字を適度に使う
 - 犬好きの心をつかむ表現
 - ハッシュタグを2〜3個（#犬 #いぬのいる生活 など）
 - 文章のみ返答してください"""
-    ])
+        ]
+    )
     return response.text
 
 # --- Xに投稿 ---
