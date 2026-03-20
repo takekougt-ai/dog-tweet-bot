@@ -11,7 +11,6 @@ from google.genai import types
 # --- 設定 ---
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 DRIVE_POSTED_FOLDER_ID = os.environ["DRIVE_POSTED_FOLDER_ID"]
-THREADS_APP_ID = os.environ["THREADS_APP_ID"]
 THREADS_ACCESS_TOKEN = os.environ["THREADS_ACCESS_TOKEN"]
 
 # --- Google Drive クライアント ---
@@ -60,7 +59,6 @@ def move_to_posted(drive, file_id: str):
 
 # --- Google Driveで画像を公開URLとして共有 ---
 def get_public_image_url(drive, file_id: str) -> str:
-    # 一時的に公開設定にする
     drive.permissions().create(
         fileId=file_id,
         body={"type": "anyone", "role": "reader"}
@@ -81,12 +79,17 @@ def generate_caption(image_path: str) -> str:
         model="gemini-2.5-flash-lite",
         contents=[
             types.Part.from_bytes(data=image_data, mime_type=mime_type),
-            """この犬の写真を見て、Threadsでバズりやすい投稿文章を日本語で1つ作成してください。
-条件：
-- 200文字以内
-- 絵文字を適度に使う
-- 犬好きの心をつかむ表現
-- ハッシュタグを2〜3個（#犬 #いぬのいる生活 など）
+            """この犬の写真を見て、Threadsに投稿する文章を日本語で1つ書いてください。
+
+以下のルールを厳守してください：
+- 絵文字は一切使わない
+- ハッシュタグは一切使わない
+- 感嘆符（！）や過剰な句読点を避ける
+- 「かわいい」「癒される」などの陳腐な表現は使わない
+- おしゃれでシュールなトーンで書く
+- 犬を擬人化したり、哲学的・文学的な視点で描写してもよい
+- 短くて余白のある文章が望ましい（3行以内）
+- 思わず「いいね」や「保存」したくなるような、じわじわくる面白さや共感を狙う
 - 文章のみ返答してください"""
         ]
     )
@@ -94,8 +97,16 @@ def generate_caption(image_path: str) -> str:
 
 # --- Threadsに画像付きで投稿 ---
 def post_to_threads(image_url: str, caption: str):
-    user_id = THREADS_APP_ID
     token = THREADS_ACCESS_TOKEN
+
+    # Step0: ユーザーIDを取得
+    me_res = requests.get(
+        "https://graph.threads.net/v1.0/me",
+        params={"fields": "id", "access_token": token}
+    )
+    me_res.raise_for_status()
+    user_id = me_res.json()["id"]
+    print(f"ユーザーID: {user_id}")
 
     # Step1: メディアコンテナを作成
     container_url = f"https://graph.threads.net/v1.0/{user_id}/threads"
@@ -148,18 +159,14 @@ def main():
     local_path, file_id = result
     file_name = os.path.basename(local_path)
 
-    # 画像を公開URLとして取得
     image_url = get_public_image_url(drive, file_id)
     print(f"画像URL: {image_url}")
 
-    # 文章生成
     caption = generate_caption(local_path)
     print(f"生成された文章:\n{caption}")
 
-    # Threadsに投稿
     post_to_threads(image_url, caption)
 
-    # 後処理
     move_to_posted(drive, file_id)
     update_log(file_name)
 
