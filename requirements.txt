@@ -1,0 +1,4 @@
+anthropic
+tweepy
+google-api-python-client
+google-auth
