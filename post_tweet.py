@@ -67,7 +67,8 @@ def generate_tweet(image_path: str) -> str:
         image_data = f.read()
 
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        # model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         contents=[
             types.Part.from_bytes(data=image_data, mime_type=mime_type),
             """この犬の写真を見て、Xでバズりやすいツイート文章を日本語で1つ作成してください。
