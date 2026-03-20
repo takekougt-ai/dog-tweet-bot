@@ -92,7 +92,7 @@ def generate_caption(image_path: str) -> str:
         image_data = f.read()
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash-lite-preview-06-17",
+        model="gemini-2.5-flash-lite",
         contents=[
             types.Part.from_bytes(data=image_data, mime_type=mime_type),
             """この犬の写真を見て、Threadsに投稿する文章を日本語で1つ書いてください。
