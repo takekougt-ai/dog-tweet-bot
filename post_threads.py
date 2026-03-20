@@ -71,7 +71,7 @@ def push_image_and_get_url(local_path: str) -> str:
     subprocess.run(["git", "config", "user.name", "github-actions"], check=True)
     subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
     subprocess.run(["git", "add", dest_path], check=True)
-    subprocess.run(["git", "commit", "-m", f"Add image for posting: {file_name}"], check=True)
+    subprocess.run(["git", "commit", "-m", f"Add image for posting: {file_name}"], check=False)
     subprocess.run(["git", "push"], check=True)
 
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/{dest_path}"
