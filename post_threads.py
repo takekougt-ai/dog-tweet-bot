@@ -1,6 +1,8 @@
 import json
 import os
 import time
+import shutil
+import subprocess
 import requests
 from datetime import datetime
 from googleapiclient.discovery import build
@@ -12,6 +14,7 @@ from google.genai import types
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 DRIVE_POSTED_FOLDER_ID = os.environ["DRIVE_POSTED_FOLDER_ID"]
 THREADS_ACCESS_TOKEN = os.environ["THREADS_ACCESS_TOKEN"]
+GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]  # 例: username/dog-tweet-bot
 
 # --- Google Drive クライアント ---
 def get_drive_client():
@@ -57,13 +60,26 @@ def move_to_posted(drive, file_id: str):
     ).execute()
     print("投稿済みフォルダに移動しました")
 
-# --- Google Driveで画像を公開URLとして共有 ---
-def get_public_image_url(drive, file_id: str) -> str:
-    drive.permissions().create(
-        fileId=file_id,
-        body={"type": "anyone", "role": "reader"}
-    ).execute()
-    return f"https://drive.google.com/uc?export=download&id={file_id}"
+# --- GitHubにpushしてraw URLを取得 ---
+def push_image_and_get_url(local_path: str) -> str:
+    file_name = os.path.basename(local_path)
+    dest_path = f"posted_images/{file_name}"
+
+    os.makedirs("posted_images", exist_ok=True)
+    shutil.copy(local_path, dest_path)
+
+    subprocess.run(["git", "config", "user.name", "github-actions"], check=True)
+    subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
+    subprocess.run(["git", "add", dest_path], check=True)
+    subprocess.run(["git", "commit", "-m", f"Add image for posting: {file_name}"], check=True)
+    subprocess.run(["git", "push"], check=True)
+
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/{dest_path}"
+    print(f"GitHub raw URL: {raw_url}")
+
+    # GitHubにファイルが反映されるまで待つ
+    time.sleep(5)
+    return raw_url
 
 # --- Geminiで文章生成 ---
 def generate_caption(image_path: str) -> str:
@@ -76,7 +92,7 @@ def generate_caption(image_path: str) -> str:
         image_data = f.read()
 
     response = client.models.generate_content(
-        model="gemini-1.5-flash-latest",
+        model="gemini-2.5-flash-lite-preview-06-17",
         contents=[
             types.Part.from_bytes(data=image_data, mime_type=mime_type),
             """この犬の写真を見て、Threadsに投稿する文章を日本語で1つ書いてください。
@@ -165,16 +181,25 @@ def main():
     local_path, file_id = result
     file_name = os.path.basename(local_path)
 
-    image_url = get_public_image_url(drive, file_id)
-    print(f"画像URL: {image_url}")
+    # GitHubにpushしてraw URLを取得
+    image_url = push_image_and_get_url(local_path)
 
+    # 文章生成
     caption = generate_caption(local_path)
     print(f"生成された文章:\n{caption}")
 
+    # Threadsに投稿
     post_to_threads(image_url, caption)
 
+    # 後処理
     move_to_posted(drive, file_id)
     update_log(file_name)
+
+    # ログもcommit
+    subprocess.run(["git", "add", "posted_log.json"], check=True)
+    subprocess.run(["git", "diff", "--staged", "--quiet"], check=False)
+    subprocess.run(["git", "commit", "-m", "Update posted log"], check=False)
+    subprocess.run(["git", "push"], check=True)
 
 if __name__ == "__main__":
     main()
