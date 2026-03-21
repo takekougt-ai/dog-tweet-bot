@@ -2,7 +2,7 @@ name: Dog Photo Threads Bot
 
 on:
   schedule:
-    - cron: '0 23 * * *'  # 毎日朝8時JST
+    - cron: '0 22 * * *'  # 毎日朝8時JST
   workflow_dispatch:        # 手動実行も可能
 
 jobs:
