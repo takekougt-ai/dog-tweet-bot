@@ -6,7 +6,8 @@ import shutil
 import requests
 from datetime import datetime
 from googleapiclient.discovery import build
-from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from google import genai
 from google.genai import types
 
@@ -29,24 +30,26 @@ PROMPT = """この犬の写真を見て、投稿する文章を日本語で1つ�
 - 文章のみ返答してください"""
 
 
-def get_drive_client():
-    creds_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
-    creds = service_account.Credentials.from_service_account_info(
-        creds_info, scopes=["https://www.googleapis.com/auth/drive"]
-    )
-    return build("drive", "v3", credentials=creds)
-
-
 def get_creds():
-    creds_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
-    return service_account.Credentials.from_service_account_info(
-        creds_info, scopes=["https://www.googleapis.com/auth/drive"]
+    creds = Credentials(
+        token=None,
+        refresh_token=os.environ["GOOGLE_REFRESH_TOKEN"],
+        client_id=os.environ["GOOGLE_CLIENT_ID"],
+        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=["https://www.googleapis.com/auth/drive"]
     )
+    creds.refresh(Request())
+    return creds
+
+
+def get_drive_client(creds):
+    return build("drive", "v3", credentials=creds)
 
 
 def download_next_photo(drive):
     results = drive.files().list(
-        q=f"'{DRIVE_FOLDER_ID}' in parents and mimeType contains 'image/' and trashed=false",
+        q="'" + DRIVE_FOLDER_ID + "' in parents and mimeType contains 'image/' and trashed=false",
         fields="files(id, name)", pageSize=1, orderBy="createdTime"
     ).execute()
 
@@ -81,15 +84,11 @@ def convert_to_jpeg(local_path):
 
 
 def upload_to_folder(local_path, folder_id, creds):
-    import google.auth.transport.requests
-
     file_name = os.path.basename(local_path)
     ext = file_name.split(".")[-1].lower()
     mime_type = "image/png" if ext == "png" else "image/jpeg"
 
-    creds.refresh(google.auth.transport.requests.Request())
     token = creds.token
-
     metadata = json.dumps({"name": file_name, "parents": [folder_id]}).encode("utf-8")
 
     # デバッグ用（メールアドレスを確認）
@@ -218,8 +217,8 @@ def update_log(file_name):
 
 
 def main():
-    drive = get_drive_client()
     creds = get_creds()
+    drive = get_drive_client(creds)
 
     result = download_next_photo(drive)
     if not result:

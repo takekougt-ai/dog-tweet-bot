@@ -20,13 +20,15 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install google-api-python-client google-auth google-genai requests pillow pillow-heif
+        run: pip install google-api-python-client google-auth google-auth-oauthlib google-genai requests pillow pillow-heif
 
       - name: Run threads bot
         env:
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
           DRIVE_POSTED_THREADS_FOLDER_ID: ${{ secrets.DRIVE_POSTED_THREADS_FOLDER_ID }}
           DRIVE_POSTED_X_FOLDER_ID: ${{ secrets.DRIVE_POSTED_X_FOLDER_ID }}
