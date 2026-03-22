@@ -9,7 +9,6 @@ from google import genai
 from google.genai import types
 from requests_oauthlib import OAuth1
 
-# --- 設定 ---
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 DRIVE_POSTED_X_FOLDER_ID = os.environ["DRIVE_POSTED_X_FOLDER_ID"]
 DRIVE_POSTED_THREADS_FOLDER_ID = os.environ["DRIVE_POSTED_THREADS_FOLDER_ID"]
@@ -30,6 +29,7 @@ PROMPT = """この犬の写真を見て、投稿する文章を日本語で1つ�
 - ハッシュタグを除いた本文は3行以内・100文字以内
 - 文章のみ返答してください"""
 
+
 def get_drive_client():
     creds_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
     creds = service_account.Credentials.from_service_account_info(
@@ -37,17 +37,17 @@ def get_drive_client():
     )
     return build("drive", "v3", credentials=creds)
 
-def get_credentials():
+
+def get_creds():
     creds_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
-    creds = service_account.Credentials.from_service_account_info(
+    return service_account.Credentials.from_service_account_info(
         creds_info, scopes=["https://www.googleapis.com/auth/drive"]
     )
-    creds.refresh(requests.Request())
-    return creds
 
-def download_next_photo(drive) -> tuple[str, str] | None:
+
+def download_next_photo(drive):
     results = drive.files().list(
-        q=f"'{DRIVE_FOLDER_ID}' in parents and mimeType contains 'image/' and trashed=false",
+        q="'" + DRIVE_FOLDER_ID + "' in parents and mimeType contains 'image/' and trashed=false",
         fields="files(id, name)", pageSize=1, orderBy="createdTime"
     ).execute()
 
@@ -58,14 +58,15 @@ def download_next_photo(drive) -> tuple[str, str] | None:
 
     file = files[0]
     content = drive.files().get_media(fileId=file["id"]).execute()
-    local_path = f"/tmp/{file['name']}"
+    local_path = "/tmp/" + file["name"]
     with open(local_path, "wb") as f:
         f.write(content)
 
-    print(f"ダウンロード完了: {file['name']}")
+    print("ダウンロード完了: " + file["name"])
     return local_path, file["id"]
 
-def convert_to_jpeg(local_path: str) -> str:
+
+def convert_to_jpeg(local_path):
     if not local_path.lower().endswith(".heic"):
         return local_path
 
@@ -76,14 +77,12 @@ def convert_to_jpeg(local_path: str) -> str:
     jpeg_path = local_path.rsplit(".", 1)[0] + ".jpg"
     img = Image.open(local_path)
     img.save(jpeg_path, "JPEG")
-    print(f"HEIC→JPEG変換完了: {jpeg_path}")
+    print("HEIC→JPEG変換完了: " + jpeg_path)
     return jpeg_path
 
-def upload_to_folder(local_path: str, folder_id: str, creds):
+
+def upload_to_folder(local_path, folder_id, creds):
     import google.auth.transport.requests
-    import email.mime.multipart
-    import email.mime.base
-    import email.mime.application
 
     file_name = os.path.basename(local_path)
     ext = file_name.split(".")[-1].lower()
@@ -97,41 +96,33 @@ def upload_to_folder(local_path: str, folder_id: str, creds):
     with open(local_path, "rb") as f:
         image_data = f.read()
 
-    boundary = "foo_bar_baz"
+    boundary = "boundary_abc123"
     body = (
-        f"--{boundary}
-"
-        f"Content-Type: application/json; charset=UTF-8
-
-"
-        + metadata.decode("utf-8") +
-        f"
---{boundary}
-"
-        f"Content-Type: {mime_type}
-
-"
-    ).encode("utf-8") + image_data + f"
---{boundary}--".encode("utf-8")
+        "--" + boundary + "\r\n"
+        "Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        + metadata.decode("utf-8")
+        + "\r\n--" + boundary + "\r\n"
+        "Content-Type: " + mime_type + "\r\n\r\n"
+    ).encode("utf-8") + image_data + ("\r\n--" + boundary + "--").encode("utf-8")
 
     res = requests.post(
         "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
         headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": f"multipart/related; boundary={boundary}",
-            "Content-Length": str(len(body))
+            "Authorization": "Bearer " + token,
+            "Content-Type": "multipart/related; boundary=" + boundary,
         },
         data=body
     )
-    print(f"Driveアップロード: {res.status_code} {res.text[:200]}")
+    print("Driveアップロード: " + str(res.status_code))
     res.raise_for_status()
     print("posted_xフォルダにアップロードしました")
 
-def delete_if_both_posted(drive, file_id: str, local_path: str):
+
+def delete_if_both_posted(drive, file_id, local_path):
     file_name = os.path.basename(local_path)
 
     results = drive.files().list(
-        q=f"'{DRIVE_POSTED_THREADS_FOLDER_ID}' in parents and name='{file_name}' and trashed=false",
+        q="'" + DRIVE_POSTED_THREADS_FOLDER_ID + "' in parents and name='" + file_name + "' and trashed=false",
         fields="files(id)"
     ).execute()
 
@@ -141,7 +132,8 @@ def delete_if_both_posted(drive, file_id: str, local_path: str):
     else:
         print("Threads側未投稿のため元ファイルは保持します")
 
-def generate_caption(image_path: str) -> str:
+
+def generate_caption(image_path):
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     ext = image_path.split(".")[-1].lower()
     mime_type = "image/png" if ext == "png" else "image/jpeg"
@@ -155,7 +147,8 @@ def generate_caption(image_path: str) -> str:
     )
     return response.text.strip()
 
-def upload_media(image_path: str) -> str:
+
+def upload_media(image_path):
     auth = OAuth1(X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET)
     ext = image_path.split(".")[-1].lower()
     mime_type = "image/png" if ext == "png" else "image/jpeg"
@@ -168,7 +161,7 @@ def upload_media(image_path: str) -> str:
         auth=auth,
         data={"command": "INIT", "media_type": mime_type, "total_bytes": len(image_data)}
     )
-    print(f"INIT: {init_res.status_code}")
+    print("INIT: " + str(init_res.status_code))
     init_res.raise_for_status()
     media_id = init_res.json()["media_id_string"]
 
@@ -178,7 +171,7 @@ def upload_media(image_path: str) -> str:
         data={"command": "APPEND", "media_id": media_id, "segment_index": 0},
         files={"media": image_data}
     )
-    print(f"APPEND: {append_res.status_code}")
+    print("APPEND: " + str(append_res.status_code))
     append_res.raise_for_status()
 
     finalize_res = requests.post(
@@ -186,23 +179,25 @@ def upload_media(image_path: str) -> str:
         auth=auth,
         data={"command": "FINALIZE", "media_id": media_id}
     )
-    print(f"FINALIZE: {finalize_res.status_code}")
+    print("FINALIZE: " + str(finalize_res.status_code))
     finalize_res.raise_for_status()
-    print(f"メディアアップロード完了: {media_id}")
+    print("メディアアップロード完了: " + media_id)
     return media_id
 
-def post_to_x(media_id: str, caption: str):
+
+def post_to_x(media_id, caption):
     auth = OAuth1(X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET)
     res = requests.post(
         "https://api.twitter.com/2/tweets",
         auth=auth,
         json={"text": caption, "media": {"media_ids": [media_id]}}
     )
-    print(f"投稿レスポンス: {res.status_code} {res.text}")
+    print("投稿レスポンス: " + str(res.status_code))
     res.raise_for_status()
-    print(f"X投稿完了！ ID: {res.json()['data']['id']}")
+    print("X投稿完了！ ID: " + res.json()["data"]["id"])
 
-def update_log(file_name: str):
+
+def update_log(file_name):
     log_path = "posted_log.json"
     with open(log_path) as f:
         log = json.load(f)
@@ -212,14 +207,10 @@ def update_log(file_name: str):
         json.dump(log, f, ensure_ascii=False, indent=2)
     print("ログ更新完了")
 
-def main():
-    import google.auth.transport.requests
 
+def main():
     drive = get_drive_client()
-    creds_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
-    creds = service_account.Credentials.from_service_account_info(
-        creds_info, scopes=["https://www.googleapis.com/auth/drive"]
-    )
+    creds = get_creds()
 
     result = download_next_photo(drive)
     if not result:
@@ -230,14 +221,14 @@ def main():
     file_name = os.path.basename(local_path)
 
     caption = generate_caption(local_path)
-    print(f"生成された文章:\n{caption}")
+    print("生成された文章:\n" + caption)
 
     media_id = upload_media(local_path)
     post_to_x(media_id, caption)
-
     upload_to_folder(local_path, DRIVE_POSTED_X_FOLDER_ID, creds)
     delete_if_both_posted(drive, file_id, local_path)
     update_log(file_name)
+
 
 if __name__ == "__main__":
     main()

@@ -10,7 +10,6 @@ from google.oauth2 import service_account
 from google import genai
 from google.genai import types
 
-# --- 設定 ---
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 DRIVE_POSTED_THREADS_FOLDER_ID = os.environ["DRIVE_POSTED_THREADS_FOLDER_ID"]
 DRIVE_POSTED_X_FOLDER_ID = os.environ["DRIVE_POSTED_X_FOLDER_ID"]
@@ -29,6 +28,7 @@ PROMPT = """この犬の写真を見て、投稿する文章を日本語で1つ�
 - ハッシュタグを除いた本文は3行以内・100文字以内
 - 文章のみ返答してください"""
 
+
 def get_drive_client():
     creds_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
     creds = service_account.Credentials.from_service_account_info(
@@ -36,7 +36,15 @@ def get_drive_client():
     )
     return build("drive", "v3", credentials=creds)
 
-def download_next_photo(drive) -> tuple[str, str] | None:
+
+def get_creds():
+    creds_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+    return service_account.Credentials.from_service_account_info(
+        creds_info, scopes=["https://www.googleapis.com/auth/drive"]
+    )
+
+
+def download_next_photo(drive):
     results = drive.files().list(
         q=f"'{DRIVE_FOLDER_ID}' in parents and mimeType contains 'image/' and trashed=false",
         fields="files(id, name)", pageSize=1, orderBy="createdTime"
@@ -49,14 +57,15 @@ def download_next_photo(drive) -> tuple[str, str] | None:
 
     file = files[0]
     content = drive.files().get_media(fileId=file["id"]).execute()
-    local_path = f"/tmp/{file['name']}"
+    local_path = "/tmp/" + file["name"]
     with open(local_path, "wb") as f:
         f.write(content)
 
-    print(f"ダウンロード完了: {file['name']}")
+    print("ダウンロード完了: " + file["name"])
     return local_path, file["id"]
 
-def convert_to_jpeg(local_path: str) -> str:
+
+def convert_to_jpeg(local_path):
     if not local_path.lower().endswith(".heic"):
         return local_path
 
@@ -67,14 +76,12 @@ def convert_to_jpeg(local_path: str) -> str:
     jpeg_path = local_path.rsplit(".", 1)[0] + ".jpg"
     img = Image.open(local_path)
     img.save(jpeg_path, "JPEG")
-    print(f"HEIC→JPEG変換完了: {jpeg_path}")
+    print("HEIC→JPEG変換完了: " + jpeg_path)
     return jpeg_path
 
-def upload_to_folder(local_path: str, folder_id: str, creds):
+
+def upload_to_folder(local_path, folder_id, creds):
     import google.auth.transport.requests
-    import email.mime.multipart
-    import email.mime.base
-    import email.mime.application
 
     file_name = os.path.basename(local_path)
     ext = file_name.split(".")[-1].lower()
@@ -88,41 +95,33 @@ def upload_to_folder(local_path: str, folder_id: str, creds):
     with open(local_path, "rb") as f:
         image_data = f.read()
 
-    boundary = "foo_bar_baz"
+    boundary = "boundary_abc123"
     body = (
-        f"--{boundary}
-"
-        f"Content-Type: application/json; charset=UTF-8
-
-"
-        + metadata.decode("utf-8") +
-        f"
---{boundary}
-"
-        f"Content-Type: {mime_type}
-
-"
-    ).encode("utf-8") + image_data + f"
---{boundary}--".encode("utf-8")
+        "--" + boundary + "\r\n"
+        "Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        + metadata.decode("utf-8")
+        + "\r\n--" + boundary + "\r\n"
+        "Content-Type: " + mime_type + "\r\n\r\n"
+    ).encode("utf-8") + image_data + ("\r\n--" + boundary + "--").encode("utf-8")
 
     res = requests.post(
         "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
         headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": f"multipart/related; boundary={boundary}",
-            "Content-Length": str(len(body))
+            "Authorization": "Bearer " + token,
+            "Content-Type": "multipart/related; boundary=" + boundary,
         },
         data=body
     )
-    print(f"Driveアップロード: {res.status_code} {res.text[:200]}")
+    print("Driveアップロード: " + str(res.status_code))
     res.raise_for_status()
-    print("posted_xフォルダにアップロードしました")
+    print("posted_threadsフォルダにアップロードしました")
 
-def delete_if_both_posted(drive, file_id: str, local_path: str):
+
+def delete_if_both_posted(drive, file_id, local_path):
     file_name = os.path.basename(local_path)
 
     results = drive.files().list(
-        q=f"'{DRIVE_POSTED_X_FOLDER_ID}' in parents and name='{file_name}' and trashed=false",
+        q="'" + DRIVE_POSTED_X_FOLDER_ID + "' in parents and name='" + file_name + "' and trashed=false",
         fields="files(id)"
     ).execute()
 
@@ -132,9 +131,10 @@ def delete_if_both_posted(drive, file_id: str, local_path: str):
     else:
         print("X側未投稿のため元ファイルは保持します")
 
-def push_image_and_get_url(local_path: str) -> str:
+
+def push_image_and_get_url(local_path):
     file_name = os.path.basename(local_path)
-    dest_path = f"posted_images/{file_name}"
+    dest_path = "posted_images/" + file_name
 
     os.makedirs("posted_images", exist_ok=True)
     shutil.copy(local_path, dest_path)
@@ -142,15 +142,16 @@ def push_image_and_get_url(local_path: str) -> str:
     subprocess.run(["git", "config", "user.name", "github-actions"], check=True)
     subprocess.run(["git", "config", "user.email", "actions@github.com"], check=True)
     subprocess.run(["git", "add", dest_path], check=True)
-    subprocess.run(["git", "commit", "-m", f"Add image for posting: {file_name}"], check=False)
+    subprocess.run(["git", "commit", "-m", "Add image for posting: " + file_name], check=False)
     subprocess.run(["git", "push"], check=True)
 
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/{dest_path}"
-    print(f"GitHub raw URL: {raw_url}")
+    raw_url = "https://raw.githubusercontent.com/" + GITHUB_REPOSITORY + "/main/" + dest_path
+    print("GitHub raw URL: " + raw_url)
     time.sleep(5)
     return raw_url
 
-def generate_caption(image_path: str) -> str:
+
+def generate_caption(image_path):
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     ext = image_path.split(".")[-1].lower()
     mime_type = "image/png" if ext == "png" else "image/jpeg"
@@ -164,7 +165,8 @@ def generate_caption(image_path: str) -> str:
     )
     return response.text.strip()
 
-def post_to_threads(image_url: str, caption: str):
+
+def post_to_threads(image_url, caption):
     token = THREADS_ACCESS_TOKEN
 
     me_res = requests.get(
@@ -175,26 +177,27 @@ def post_to_threads(image_url: str, caption: str):
     user_id = me_res.json()["id"]
 
     container_res = requests.post(
-        f"https://graph.threads.net/v1.0/{user_id}/threads",
+        "https://graph.threads.net/v1.0/" + user_id + "/threads",
         params={"access_token": token},
         json={"media_type": "IMAGE", "image_url": image_url, "text": caption}
     )
-    print(f"コンテナレスポンス: {container_res.status_code} {container_res.text}")
+    print("コンテナレスポンス: " + str(container_res.status_code))
     container_res.raise_for_status()
     container_id = container_res.json()["id"]
 
     time.sleep(10)
 
     publish_res = requests.post(
-        f"https://graph.threads.net/v1.0/{user_id}/threads_publish",
+        "https://graph.threads.net/v1.0/" + user_id + "/threads_publish",
         params={"access_token": token},
         json={"creation_id": container_id}
     )
-    print(f"公開レスポンス: {publish_res.status_code} {publish_res.text}")
+    print("公開レスポンス: " + str(publish_res.status_code))
     publish_res.raise_for_status()
-    print(f"Threads投稿完了！ ID: {publish_res.json()['id']}")
+    print("Threads投稿完了！ ID: " + publish_res.json()["id"])
 
-def update_log(file_name: str):
+
+def update_log(file_name):
     log_path = "posted_log.json"
     with open(log_path) as f:
         log = json.load(f)
@@ -204,14 +207,10 @@ def update_log(file_name: str):
         json.dump(log, f, ensure_ascii=False, indent=2)
     print("ログ更新完了")
 
-def main():
-    import google.auth.transport.requests
 
+def main():
     drive = get_drive_client()
-    creds_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
-    creds = service_account.Credentials.from_service_account_info(
-        creds_info, scopes=["https://www.googleapis.com/auth/drive"]
-    )
+    creds = get_creds()
 
     result = download_next_photo(drive)
     if not result:
@@ -223,7 +222,7 @@ def main():
 
     image_url = push_image_and_get_url(local_path)
     caption = generate_caption(local_path)
-    print(f"生成された文章:\n{caption}")
+    print("生成された文章:\n" + caption)
 
     post_to_threads(image_url, caption)
     upload_to_folder(local_path, DRIVE_POSTED_THREADS_FOLDER_ID, creds)
@@ -233,6 +232,7 @@ def main():
     subprocess.run(["git", "add", "posted_log.json"], check=True)
     subprocess.run(["git", "commit", "-m", "Update posted log [threads]"], check=False)
     subprocess.run(["git", "push"], check=True)
+
 
 if __name__ == "__main__":
     main()
