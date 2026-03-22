@@ -75,11 +75,17 @@ def convert_to_jpeg(local_path: str) -> str:
     return jpeg_path
 
 def copy_to_posted_x(drive, local_path: str):
+    import httplib2
+    from googleapiclient.http import MediaIoBaseUpload
+    import io
+
     file_name = os.path.basename(local_path)
     ext = file_name.split(".")[-1].lower()
     mime_type = "image/png" if ext == "png" else "image/jpeg"
 
-    media = MediaFileUpload(local_path, mimetype=mime_type, resumable=False)
+    with open(local_path, "rb") as f:
+        media = MediaIoBaseUpload(io.BytesIO(f.read()), mimetype=mime_type, resumable=False)
+
     drive.files().create(
         body={"name": file_name, "parents": [DRIVE_POSTED_X_FOLDER_ID]},
         media_body=media,
