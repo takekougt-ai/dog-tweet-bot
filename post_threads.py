@@ -91,9 +91,6 @@ def upload_to_folder(local_path, folder_id, creds):
     token = creds.token
     metadata = json.dumps({"name": file_name, "parents": [folder_id]}).encode("utf-8")
 
-    # デバッグ用（メールアドレスを確認）
-    print(f"Using service account: {creds.service_account_email}")
-
     with open(local_path, "rb") as f:
         image_data = f.read()
 
@@ -115,12 +112,6 @@ def upload_to_folder(local_path, folder_id, creds):
         data=body
     )
     print("Driveアップロード: " + str(res.status_code))
-
-
-    # 116行目の前に追加
-    print(f"Error details: {res.text}") 
-    res.raise_for_status()
-    
     res.raise_for_status()
     print("posted_threadsフォルダにアップロードしました")
 
