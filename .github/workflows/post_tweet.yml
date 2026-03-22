@@ -20,7 +20,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install google-api-python-client google-auth google-genai requests
+        run: pip install google-api-python-client google-auth google-genai requests pillow pillow-heif
 
       - name: Run threads bot
         env:
