@@ -79,10 +79,11 @@ def copy_to_posted_x(drive, local_path: str):
     ext = file_name.split(".")[-1].lower()
     mime_type = "image/png" if ext == "png" else "image/jpeg"
 
-    media = MediaFileUpload(local_path, mimetype=mime_type)
+    media = MediaFileUpload(local_path, mimetype=mime_type, resumable=False)
     drive.files().create(
         body={"name": file_name, "parents": [DRIVE_POSTED_X_FOLDER_ID]},
-        media_body=media
+        media_body=media,
+        fields="id"
     ).execute()
     print("posted_xフォルダにアップロードしました")
 
