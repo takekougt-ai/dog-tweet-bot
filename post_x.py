@@ -1,0 +1,210 @@
+import json
+import os
+import time
+import requests
+from datetime import datetime
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from google import genai
+from google.genai import types
+from requests_oauthlib import OAuth1
+
+# --- 設定 ---
+DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
+DRIVE_POSTED_FOLDER_ID = os.environ["DRIVE_POSTED_FOLDER_ID"]
+X_API_KEY = os.environ["X_API_KEY"]
+X_API_SECRET = os.environ["X_API_SECRET"]
+X_ACCESS_TOKEN = os.environ["X_ACCESS_TOKEN"]
+X_ACCESS_TOKEN_SECRET = os.environ["X_ACCESS_TOKEN_SECRET"]
+
+# --- Google Drive クライアント ---
+def get_drive_client():
+    creds_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+    creds = service_account.Credentials.from_service_account_info(
+        creds_info,
+        scopes=["https://www.googleapis.com/auth/drive"]
+    )
+    return build("drive", "v3", credentials=creds)
+
+# --- Google Driveから写真を1枚取得 ---
+def download_next_photo(drive) -> tuple[str, str] | None:
+    results = drive.files().list(
+        q=f"'{DRIVE_FOLDER_ID}' in parents and mimeType contains 'image/' and trashed=false",
+        fields="files(id, name)",
+        pageSize=1,
+        orderBy="createdTime"
+    ).execute()
+
+    files = results.get("files", [])
+    if not files:
+        print("投稿できる写真がありません")
+        return None
+
+    file = files[0]
+    file_id = file["id"]
+    file_name = file["name"]
+
+    content = drive.files().get_media(fileId=file_id).execute()
+    local_path = f"/tmp/{file_name}"
+    with open(local_path, "wb") as f:
+        f.write(content)
+
+    print(f"ダウンロード完了: {file_name}")
+    return local_path, file_id
+
+# --- 投稿済みフォルダに移動 ---
+def move_to_posted(drive, file_id: str):
+    drive.files().update(
+        fileId=file_id,
+        addParents=DRIVE_POSTED_FOLDER_ID,
+        removeParents=DRIVE_FOLDER_ID
+    ).execute()
+    print("投稿済みフォルダに移動しました")
+
+# --- Geminiで文章生成 ---
+def generate_caption(image_path: str) -> str:
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+
+    ext = image_path.split(".")[-1].lower()
+    mime_type = "image/png" if ext == "png" else "image/jpeg"
+
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-lite-preview-06-17",
+        contents=[
+            types.Part.from_bytes(data=image_data, mime_type=mime_type),
+            """この犬の写真を見て、Xに投稿する文章を日本語で1つ書いてください。
+
+以下のルールを厳守してください：
+- 絵文字は一切使わない
+- ハッシュタグは一切使わない
+- 感嘆符（！）や過剰な句読点を避ける
+- 「かわいい」「癒される」などの陳腐な表現は使わない
+- おしゃれでシュールなトーンで書く
+- 犬を擬人化したり、哲学的・文学的な視点で描写してもよい
+- 短くて余白のある文章が望ましい（3行以内）
+- 140文字以内
+- 文章のみ返答してください"""
+        ]
+    )
+    return response.text.strip()
+
+# --- X v2 APIで画像アップロード ---
+def upload_media(image_path: str) -> str:
+    auth = OAuth1(
+        X_API_KEY,
+        X_API_SECRET,
+        X_ACCESS_TOKEN,
+        X_ACCESS_TOKEN_SECRET
+    )
+
+    ext = image_path.split(".")[-1].lower()
+    mime_type = "image/png" if ext == "png" else "image/jpeg"
+
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+
+    # Step1: INIT
+    init_res = requests.post(
+        "https://upload.twitter.com/1.1/media/upload.json",
+        auth=auth,
+        data={
+            "command": "INIT",
+            "media_type": mime_type,
+            "total_bytes": len(image_data)
+        }
+    )
+    print(f"INIT: {init_res.status_code} {init_res.text}")
+    init_res.raise_for_status()
+    media_id = init_res.json()["media_id_string"]
+
+    # Step2: APPEND
+    append_res = requests.post(
+        "https://upload.twitter.com/1.1/media/upload.json",
+        auth=auth,
+        data={
+            "command": "APPEND",
+            "media_id": media_id,
+            "segment_index": 0
+        },
+        files={"media": image_data}
+    )
+    print(f"APPEND: {append_res.status_code}")
+    append_res.raise_for_status()
+
+    # Step3: FINALIZE
+    finalize_res = requests.post(
+        "https://upload.twitter.com/1.1/media/upload.json",
+        auth=auth,
+        data={
+            "command": "FINALIZE",
+            "media_id": media_id
+        }
+    )
+    print(f"FINALIZE: {finalize_res.status_code} {finalize_res.text}")
+    finalize_res.raise_for_status()
+
+    print(f"メディアアップロード完了: {media_id}")
+    return media_id
+
+# --- Xに投稿 ---
+def post_to_x(media_id: str, caption: str):
+    auth = OAuth1(
+        X_API_KEY,
+        X_API_SECRET,
+        X_ACCESS_TOKEN,
+        X_ACCESS_TOKEN_SECRET
+    )
+
+    res = requests.post(
+        "https://api.twitter.com/2/tweets",
+        auth=auth,
+        json={
+            "text": caption,
+            "media": {"media_ids": [media_id]}
+        }
+    )
+    print(f"投稿レスポンス: {res.status_code} {res.text}")
+    res.raise_for_status()
+    print(f"X投稿完了！ ID: {res.json()['data']['id']}")
+
+# --- ログ更新 ---
+def update_log(file_name: str):
+    log_path = "posted_log.json"
+    with open(log_path) as f:
+        log = json.load(f)
+
+    log["posted"].append(file_name)
+    log["history"].append({
+        "file": file_name,
+        "posted_at": datetime.utcnow().isoformat()
+    })
+
+    with open(log_path, "w") as f:
+        json.dump(log, f, ensure_ascii=False, indent=2)
+    print("ログ更新完了")
+
+# --- メイン ---
+def main():
+    drive = get_drive_client()
+
+    result = download_next_photo(drive)
+    if not result:
+        return
+
+    local_path, file_id = result
+    file_name = os.path.basename(local_path)
+
+    caption = generate_caption(local_path)
+    print(f"生成された文章:\n{caption}")
+
+    media_id = upload_media(local_path)
+    post_to_x(media_id, caption)
+
+    move_to_posted(drive, file_id)
+    update_log(file_name)
+
+if __name__ == "__main__":
+    main()
