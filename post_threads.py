@@ -1,8 +1,8 @@
 import json
 import os
 import time
-import shutil
 import subprocess
+import shutil
 import requests
 from datetime import datetime
 from googleapiclient.discovery import build
@@ -12,9 +12,22 @@ from google.genai import types
 
 # --- 設定 ---
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
-DRIVE_POSTED_FOLDER_ID = os.environ["DRIVE_POSTED_FOLDER_ID"]
+DRIVE_POSTED_THREADS_FOLDER_ID = os.environ["DRIVE_POSTED_THREADS_FOLDER_ID"]
 THREADS_ACCESS_TOKEN = os.environ["THREADS_ACCESS_TOKEN"]
-GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]  # 例: username/dog-tweet-bot
+GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
+
+PROMPT = """この犬の写真を見て、投稿する文章を日本語で1つ書いてください。
+
+以下のルールを厳守してください：
+- 絵文字は一切使わない
+- ハッシュタグは「シーズー」「ポメラニアン」「ポメズー」「犬」
+- 感嘆符（！）や過剰な句読点を避ける
+- 「かわいい」「癒される」などの陳腐な表現は使わない
+- おしゃれでシュールなトーンで書く
+- 犬を擬人化したり、哲学的・文学的な視点で描写してもよい
+- 短くて余白のある文章が望ましい（3行以内）
+- 140文字以内
+- 文章のみ返答してください"""
 
 # --- Google Drive クライアント ---
 def get_drive_client():
@@ -51,14 +64,30 @@ def download_next_photo(drive) -> tuple[str, str] | None:
     print(f"ダウンロード完了: {file_name}")
     return local_path, file_id
 
-# --- 投稿済みフォルダに移動 ---
-def move_to_posted(drive, file_id: str):
-    drive.files().update(
+# --- posted_threadsフォルダにコピー ---
+def copy_to_posted_threads(drive, file_id: str):
+    drive.files().copy(
         fileId=file_id,
-        addParents=DRIVE_POSTED_FOLDER_ID,
-        removeParents=DRIVE_FOLDER_ID
+        body={"parents": [DRIVE_POSTED_THREADS_FOLDER_ID]}
     ).execute()
-    print("投稿済みフォルダに移動しました")
+    print("posted_threadsフォルダにコピーしました")
+
+# --- 両方投稿済みなら元フォルダから削除 ---
+def delete_if_both_posted(drive, file_id: str):
+    posted_x_folder_id = os.environ["DRIVE_POSTED_X_FOLDER_ID"]
+    file_info = drive.files().get(fileId=file_id, fields="name").execute()
+    file_name = file_info["name"]
+
+    results = drive.files().list(
+        q=f"'{posted_x_folder_id}' in parents and name='{file_name}' and trashed=false",
+        fields="files(id)"
+    ).execute()
+
+    if results.get("files"):
+        drive.files().delete(fileId=file_id).execute()
+        print("両方投稿済みのため元ファイルを削除しました")
+    else:
+        print("X側未投稿のため元ファイルは保持します")
 
 # --- GitHubにpushしてraw URLを取得 ---
 def push_image_and_get_url(local_path: str) -> str:
@@ -76,8 +105,6 @@ def push_image_and_get_url(local_path: str) -> str:
 
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPOSITORY}/main/{dest_path}"
     print(f"GitHub raw URL: {raw_url}")
-
-    # GitHubにファイルが反映されるまで待つ
     time.sleep(5)
     return raw_url
 
@@ -95,18 +122,7 @@ def generate_caption(image_path: str) -> str:
         model="gemini-2.5-flash-lite",
         contents=[
             types.Part.from_bytes(data=image_data, mime_type=mime_type),
-            """この犬の写真を見て、Threadsに投稿する文章を日本語で1つ書いてください。
-
-以下のルールを厳守してください：
-- 絵文字は一切使わない
-- ハッシュタグは一切使わない
-- 感嘆符（！）や過剰な句読点を避ける
-- 「かわいい」「癒される」などの陳腐な表現は使わない
-- おしゃれでシュールなトーンで書く
-- 犬を擬人化したり、哲学的・文学的な視点で描写してもよい
-- 短くて余白のある文章が望ましい（3行以内）
-- 思わず「いいね」や「保存」したくなるような、じわじわくる面白さや共感を狙う
-- 文章のみ返答してください"""
+            PROMPT
         ]
     )
     return response.text.strip()
@@ -115,7 +131,6 @@ def generate_caption(image_path: str) -> str:
 def post_to_threads(image_url: str, caption: str):
     token = THREADS_ACCESS_TOKEN
 
-    # Step0: ユーザーIDを取得
     me_res = requests.get(
         "https://graph.threads.net/v1.0/me",
         params={"fields": "id", "access_token": token}
@@ -124,29 +139,19 @@ def post_to_threads(image_url: str, caption: str):
     user_id = me_res.json()["id"]
     print(f"ユーザーID: {user_id}")
 
-    # Step1: メディアコンテナを作成
-    container_url = f"https://graph.threads.net/v1.0/{user_id}/threads"
     container_res = requests.post(
-        container_url,
+        f"https://graph.threads.net/v1.0/{user_id}/threads",
         params={"access_token": token},
-        json={
-            "media_type": "IMAGE",
-            "image_url": image_url,
-            "text": caption
-        }
+        json={"media_type": "IMAGE", "image_url": image_url, "text": caption}
     )
     print(f"コンテナレスポンス: {container_res.status_code} {container_res.text}")
     container_res.raise_for_status()
     container_id = container_res.json()["id"]
-    print(f"コンテナ作成完了: {container_id}")
 
-    # Step2: 処理待ち
     time.sleep(10)
 
-    # Step3: 投稿を公開
-    publish_url = f"https://graph.threads.net/v1.0/{user_id}/threads_publish"
     publish_res = requests.post(
-        publish_url,
+        f"https://graph.threads.net/v1.0/{user_id}/threads_publish",
         params={"access_token": token},
         json={"creation_id": container_id}
     )
@@ -159,13 +164,8 @@ def update_log(file_name: str):
     log_path = "posted_log.json"
     with open(log_path) as f:
         log = json.load(f)
-
     log["posted"].append(file_name)
-    log["history"].append({
-        "file": file_name,
-        "posted_at": datetime.utcnow().isoformat()
-    })
-
+    log["history"].append({"file": file_name, "posted_at": datetime.utcnow().isoformat(), "platform": "threads"})
     with open(log_path, "w") as f:
         json.dump(log, f, ensure_ascii=False, indent=2)
     print("ログ更新完了")
@@ -181,24 +181,17 @@ def main():
     local_path, file_id = result
     file_name = os.path.basename(local_path)
 
-    # GitHubにpushしてraw URLを取得
     image_url = push_image_and_get_url(local_path)
-
-    # 文章生成
     caption = generate_caption(local_path)
     print(f"生成された文章:\n{caption}")
 
-    # Threadsに投稿
     post_to_threads(image_url, caption)
-
-    # 後処理
-    move_to_posted(drive, file_id)
+    copy_to_posted_threads(drive, file_id)
+    delete_if_both_posted(drive, file_id)
     update_log(file_name)
 
-    # ログもcommit
     subprocess.run(["git", "add", "posted_log.json"], check=True)
-    subprocess.run(["git", "diff", "--staged", "--quiet"], check=False)
-    subprocess.run(["git", "commit", "-m", "Update posted log"], check=False)
+    subprocess.run(["git", "commit", "-m", "Update posted log [threads]"], check=False)
     subprocess.run(["git", "push"], check=True)
 
 if __name__ == "__main__":

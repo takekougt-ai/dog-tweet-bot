@@ -11,11 +11,24 @@ from requests_oauthlib import OAuth1
 
 # --- 設定 ---
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
-DRIVE_POSTED_FOLDER_ID = os.environ["DRIVE_POSTED_FOLDER_ID"]
+DRIVE_POSTED_X_FOLDER_ID = os.environ["DRIVE_POSTED_X_FOLDER_ID"]
 X_API_KEY = os.environ["X_API_KEY"]
 X_API_SECRET = os.environ["X_API_SECRET"]
 X_ACCESS_TOKEN = os.environ["X_ACCESS_TOKEN"]
 X_ACCESS_TOKEN_SECRET = os.environ["X_ACCESS_TOKEN_SECRET"]
+
+PROMPT = """この犬の写真を見て、投稿する文章を日本語で1つ書いてください。
+
+以下のルールを厳守してください：
+- 絵文字は一切使わない
+- ハッシュタグは「シーズー」「ポメラニアン」「ポメズー」「犬」
+- 感嘆符（！）や過剰な句読点を避ける
+- 「かわいい」「癒される」などの陳腐な表現は使わない
+- おしゃれでシュールなトーンで書く
+- 犬を擬人化したり、哲学的・文学的な視点で描写してもよい
+- 短くて余白のある文章が望ましい（3行以内）
+- 140文字以内
+- 文章のみ返答してください"""
 
 # --- Google Drive クライアント ---
 def get_drive_client():
@@ -52,14 +65,30 @@ def download_next_photo(drive) -> tuple[str, str] | None:
     print(f"ダウンロード完了: {file_name}")
     return local_path, file_id
 
-# --- 投稿済みフォルダに移動 ---
-def move_to_posted(drive, file_id: str):
-    drive.files().update(
+# --- posted_xフォルダにコピー ---
+def copy_to_posted_x(drive, file_id: str):
+    drive.files().copy(
         fileId=file_id,
-        addParents=DRIVE_POSTED_FOLDER_ID,
-        removeParents=DRIVE_FOLDER_ID
+        body={"parents": [DRIVE_POSTED_X_FOLDER_ID]}
     ).execute()
-    print("投稿済みフォルダに移動しました")
+    print("posted_xフォルダにコピーしました")
+
+# --- 両方投稿済みなら元フォルダから削除 ---
+def delete_if_both_posted(drive, file_id: str):
+    posted_threads_folder_id = os.environ["DRIVE_POSTED_THREADS_FOLDER_ID"]
+    file_info = drive.files().get(fileId=file_id, fields="name").execute()
+    file_name = file_info["name"]
+
+    results = drive.files().list(
+        q=f"'{posted_threads_folder_id}' in parents and name='{file_name}' and trashed=false",
+        fields="files(id)"
+    ).execute()
+
+    if results.get("files"):
+        drive.files().delete(fileId=file_id).execute()
+        print("両方投稿済みのため元ファイルを削除しました")
+    else:
+        print("Threads側未投稿のため元ファイルは保持します")
 
 # --- Geminiで文章生成 ---
 def generate_caption(image_path: str) -> str:
@@ -72,78 +101,47 @@ def generate_caption(image_path: str) -> str:
         image_data = f.read()
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash-lite-preview-06-17",
+        model="gemini-2.5-flash-lite",
         contents=[
             types.Part.from_bytes(data=image_data, mime_type=mime_type),
-            """この犬の写真を見て、Xに投稿する文章を日本語で1つ書いてください。
-
-以下のルールを厳守してください：
-- 絵文字は一切使わない
-- ハッシュタグは一切使わない
-- 感嘆符（！）や過剰な句読点を避ける
-- 「かわいい」「癒される」などの陳腐な表現は使わない
-- おしゃれでシュールなトーンで書く
-- 犬を擬人化したり、哲学的・文学的な視点で描写してもよい
-- 短くて余白のある文章が望ましい（3行以内）
-- 140文字以内
-- 文章のみ返答してください"""
+            PROMPT
         ]
     )
     return response.text.strip()
 
-# --- X v2 APIで画像アップロード ---
+# --- X v1.1 APIで画像アップロード ---
 def upload_media(image_path: str) -> str:
-    auth = OAuth1(
-        X_API_KEY,
-        X_API_SECRET,
-        X_ACCESS_TOKEN,
-        X_ACCESS_TOKEN_SECRET
-    )
-
+    auth = OAuth1(X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET)
     ext = image_path.split(".")[-1].lower()
     mime_type = "image/png" if ext == "png" else "image/jpeg"
 
     with open(image_path, "rb") as f:
         image_data = f.read()
 
-    # Step1: INIT
     init_res = requests.post(
         "https://upload.twitter.com/1.1/media/upload.json",
         auth=auth,
-        data={
-            "command": "INIT",
-            "media_type": mime_type,
-            "total_bytes": len(image_data)
-        }
+        data={"command": "INIT", "media_type": mime_type, "total_bytes": len(image_data)}
     )
-    print(f"INIT: {init_res.status_code} {init_res.text}")
+    print(f"INIT: {init_res.status_code}")
     init_res.raise_for_status()
     media_id = init_res.json()["media_id_string"]
 
-    # Step2: APPEND
     append_res = requests.post(
         "https://upload.twitter.com/1.1/media/upload.json",
         auth=auth,
-        data={
-            "command": "APPEND",
-            "media_id": media_id,
-            "segment_index": 0
-        },
+        data={"command": "APPEND", "media_id": media_id, "segment_index": 0},
         files={"media": image_data}
     )
     print(f"APPEND: {append_res.status_code}")
     append_res.raise_for_status()
 
-    # Step3: FINALIZE
     finalize_res = requests.post(
         "https://upload.twitter.com/1.1/media/upload.json",
         auth=auth,
-        data={
-            "command": "FINALIZE",
-            "media_id": media_id
-        }
+        data={"command": "FINALIZE", "media_id": media_id}
     )
-    print(f"FINALIZE: {finalize_res.status_code} {finalize_res.text}")
+    print(f"FINALIZE: {finalize_res.status_code}")
     finalize_res.raise_for_status()
 
     print(f"メディアアップロード完了: {media_id}")
@@ -151,20 +149,11 @@ def upload_media(image_path: str) -> str:
 
 # --- Xに投稿 ---
 def post_to_x(media_id: str, caption: str):
-    auth = OAuth1(
-        X_API_KEY,
-        X_API_SECRET,
-        X_ACCESS_TOKEN,
-        X_ACCESS_TOKEN_SECRET
-    )
-
+    auth = OAuth1(X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET)
     res = requests.post(
         "https://api.twitter.com/2/tweets",
         auth=auth,
-        json={
-            "text": caption,
-            "media": {"media_ids": [media_id]}
-        }
+        json={"text": caption, "media": {"media_ids": [media_id]}}
     )
     print(f"投稿レスポンス: {res.status_code} {res.text}")
     res.raise_for_status()
@@ -175,13 +164,8 @@ def update_log(file_name: str):
     log_path = "posted_log.json"
     with open(log_path) as f:
         log = json.load(f)
-
     log["posted"].append(file_name)
-    log["history"].append({
-        "file": file_name,
-        "posted_at": datetime.utcnow().isoformat()
-    })
-
+    log["history"].append({"file": file_name, "posted_at": datetime.utcnow().isoformat(), "platform": "x"})
     with open(log_path, "w") as f:
         json.dump(log, f, ensure_ascii=False, indent=2)
     print("ログ更新完了")
@@ -202,8 +186,8 @@ def main():
 
     media_id = upload_media(local_path)
     post_to_x(media_id, caption)
-
-    move_to_posted(drive, file_id)
+    copy_to_posted_x(drive, file_id)
+    delete_if_both_posted(drive, file_id)
     update_log(file_name)
 
 if __name__ == "__main__":
