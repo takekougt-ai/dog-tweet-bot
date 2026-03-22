@@ -2,8 +2,8 @@ name: Dog Photo Threads Bot
 
 on:
   schedule:
-    - cron: '0 22 * * *'  # 毎日朝8時JST
-  workflow_dispatch:        # 手動実行も可能
+    - cron: '0 22 * * *'  # 毎日朝7時JST
+  workflow_dispatch:
 
 jobs:
   post-threads:
@@ -20,23 +20,15 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install google-api-python-client google-auth google-genai requests
 
       - name: Run threads bot
         env:
-          THREADS_APP_ID: ${{ secrets.THREADS_APP_ID }}
-          THREADS_APP_SECRET: ${{ secrets.THREADS_APP_SECRET }}
           THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
-          DRIVE_POSTED_FOLDER_ID: ${{ secrets.DRIVE_POSTED_FOLDER_ID }}
+          DRIVE_POSTED_THREADS_FOLDER_ID: ${{ secrets.DRIVE_POSTED_THREADS_FOLDER_ID }}
+          DRIVE_POSTED_X_FOLDER_ID: ${{ secrets.DRIVE_POSTED_X_FOLDER_ID }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python post_threads.py
-
-      - name: Commit updated log
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add posted_log.json
-          git diff --staged --quiet || git commit -m "Update posted log"
-          git push

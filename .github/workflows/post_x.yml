@@ -31,13 +31,6 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
-          DRIVE_POSTED_FOLDER_ID: ${{ secrets.DRIVE_POSTED_FOLDER_ID }}
+          DRIVE_POSTED_X_FOLDER_ID: ${{ secrets.DRIVE_POSTED_X_FOLDER_ID }}
+          DRIVE_POSTED_THREADS_FOLDER_ID: ${{ secrets.DRIVE_POSTED_THREADS_FOLDER_ID }}
         run: python post_x.py
-
-      - name: Commit updated log
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add posted_log.json
-          git diff --staged --quiet || git commit -m "Update posted log"
-          git push
