@@ -72,6 +72,10 @@ def convert_to_jpeg(local_path: str) -> str:
 
 def upload_to_folder(local_path: str, folder_id: str, creds):
     import google.auth.transport.requests
+    import email.mime.multipart
+    import email.mime.base
+    import email.mime.application
+
     file_name = os.path.basename(local_path)
     ext = file_name.split(".")[-1].lower()
     mime_type = "image/png" if ext == "png" else "image/jpeg"
@@ -79,20 +83,40 @@ def upload_to_folder(local_path: str, folder_id: str, creds):
     creds.refresh(google.auth.transport.requests.Request())
     token = creds.token
 
-    metadata = json.dumps({"name": file_name, "parents": [folder_id]})
+    metadata = json.dumps({"name": file_name, "parents": [folder_id]}).encode("utf-8")
+
     with open(local_path, "rb") as f:
         image_data = f.read()
 
+    boundary = "foo_bar_baz"
+    body = (
+        f"--{boundary}
+"
+        f"Content-Type: application/json; charset=UTF-8
+
+"
+        + metadata.decode("utf-8") +
+        f"
+--{boundary}
+"
+        f"Content-Type: {mime_type}
+
+"
+    ).encode("utf-8") + image_data + f"
+--{boundary}--".encode("utf-8")
+
     res = requests.post(
         "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
-        headers={"Authorization": f"Bearer {token}"},
-        files={
-            "metadata": ("metadata", metadata, "application/json"),
-            "file": (file_name, image_data, mime_type)
-        }
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/related; boundary={boundary}",
+            "Content-Length": str(len(body))
+        },
+        data=body
     )
-    print(f"Driveアップロード: {res.status_code}")
+    print(f"Driveアップロード: {res.status_code} {res.text[:200]}")
     res.raise_for_status()
+    print("posted_xフォルダにアップロードしました")
 
 def delete_if_both_posted(drive, file_id: str, local_path: str):
     file_name = os.path.basename(local_path)
