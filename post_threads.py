@@ -6,7 +6,6 @@ import shutil
 import requests
 from datetime import datetime
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
 from google.oauth2 import service_account
 from google import genai
 from google.genai import types
@@ -14,6 +13,7 @@ from google.genai import types
 # --- 設定 ---
 DRIVE_FOLDER_ID = os.environ["DRIVE_FOLDER_ID"]
 DRIVE_POSTED_THREADS_FOLDER_ID = os.environ["DRIVE_POSTED_THREADS_FOLDER_ID"]
+DRIVE_POSTED_X_FOLDER_ID = os.environ["DRIVE_POSTED_X_FOLDER_ID"]
 THREADS_ACCESS_TOKEN = os.environ["THREADS_ACCESS_TOKEN"]
 GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
 
@@ -48,16 +48,13 @@ def download_next_photo(drive) -> tuple[str, str] | None:
         return None
 
     file = files[0]
-    file_id = file["id"]
-    file_name = file["name"]
-
-    content = drive.files().get_media(fileId=file_id).execute()
-    local_path = f"/tmp/{file_name}"
+    content = drive.files().get_media(fileId=file["id"]).execute()
+    local_path = f"/tmp/{file['name']}"
     with open(local_path, "wb") as f:
         f.write(content)
 
-    print(f"ダウンロード完了: {file_name}")
-    return local_path, file_id
+    print(f"ダウンロード完了: {file['name']}")
+    return local_path, file["id"]
 
 def convert_to_jpeg(local_path: str) -> str:
     if not local_path.lower().endswith(".heic"):
@@ -73,31 +70,35 @@ def convert_to_jpeg(local_path: str) -> str:
     print(f"HEIC→JPEG変換完了: {jpeg_path}")
     return jpeg_path
 
-def copy_to_posted_threads(drive, local_path: str):
-    from googleapiclient.http import MediaIoBaseUpload
-    import io
-
+def upload_to_folder(local_path: str, folder_id: str, creds):
+    import google.auth.transport.requests
     file_name = os.path.basename(local_path)
     ext = file_name.split(".")[-1].lower()
     mime_type = "image/png" if ext == "png" else "image/jpeg"
 
+    creds.refresh(google.auth.transport.requests.Request())
+    token = creds.token
+
+    metadata = json.dumps({"name": file_name, "parents": [folder_id]})
     with open(local_path, "rb") as f:
-        media = MediaIoBaseUpload(io.BytesIO(f.read()), mimetype=mime_type, resumable=False)
+        image_data = f.read()
 
-    drive.files().create(
-        body={"name": file_name, "parents": [DRIVE_POSTED_THREADS_FOLDER_ID]},
-        media_body=media,
-        fields="id"
-    ).execute()
-    print("posted_threadsフォルダにアップロードしました")
+    res = requests.post(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+        headers={"Authorization": f"Bearer {token}"},
+        files={
+            "metadata": ("metadata", metadata, "application/json"),
+            "file": (file_name, image_data, mime_type)
+        }
+    )
+    print(f"Driveアップロード: {res.status_code}")
+    res.raise_for_status()
 
-def delete_if_both_posted(drive, file_id: str):
-    posted_x_folder_id = os.environ["DRIVE_POSTED_X_FOLDER_ID"]
-    file_info = drive.files().get(fileId=file_id, fields="name").execute()
-    file_name = file_info["name"]
+def delete_if_both_posted(drive, file_id: str, local_path: str):
+    file_name = os.path.basename(local_path)
 
     results = drive.files().list(
-        q=f"'{posted_x_folder_id}' in parents and name='{file_name}' and trashed=false",
+        q=f"'{DRIVE_POSTED_X_FOLDER_ID}' in parents and name='{file_name}' and trashed=false",
         fields="files(id)"
     ).execute()
 
@@ -148,7 +149,6 @@ def post_to_threads(image_url: str, caption: str):
     )
     me_res.raise_for_status()
     user_id = me_res.json()["id"]
-    print(f"ユーザーID: {user_id}")
 
     container_res = requests.post(
         f"https://graph.threads.net/v1.0/{user_id}/threads",
@@ -181,7 +181,13 @@ def update_log(file_name: str):
     print("ログ更新完了")
 
 def main():
+    import google.auth.transport.requests
+
     drive = get_drive_client()
+    creds_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+    creds = service_account.Credentials.from_service_account_info(
+        creds_info, scopes=["https://www.googleapis.com/auth/drive"]
+    )
 
     result = download_next_photo(drive)
     if not result:
@@ -196,8 +202,8 @@ def main():
     print(f"生成された文章:\n{caption}")
 
     post_to_threads(image_url, caption)
-    copy_to_posted_threads(drive, local_path)
-    delete_if_both_posted(drive, file_id)
+    upload_to_folder(local_path, DRIVE_POSTED_THREADS_FOLDER_ID, creds)
+    delete_if_both_posted(drive, file_id, local_path)
     update_log(file_name)
 
     subprocess.run(["git", "add", "posted_log.json"], check=True)
