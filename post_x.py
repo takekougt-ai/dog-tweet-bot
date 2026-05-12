@@ -158,7 +158,7 @@ def upload_media(image_path):
     init_res = requests.post(
         "https://upload.twitter.com/1.1/media/upload.json",
         auth=auth,
-        data={"command": "INIT", "media_type": mime_type, "total_bytes": len(image_data)}
+        data={"command": "INIT", "media_type": mime_type, "total_bytes": len(image_data), "media_category": "tweet_image"}
     )
     print("INIT: " + str(init_res.status_code))
     init_res.raise_for_status()
