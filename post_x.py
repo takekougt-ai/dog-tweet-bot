@@ -161,6 +161,7 @@ def upload_media(image_path):
         data={"command": "INIT", "media_type": mime_type, "total_bytes": len(image_data), "media_category": "tweet_image"}
     )
     print("INIT: " + str(init_res.status_code))
+    print("INIT response: " + init_res.text)
     init_res.raise_for_status()
     media_id = init_res.json()["media_id_string"]
 
