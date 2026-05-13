@@ -84,6 +84,25 @@ def convert_to_jpeg(local_path):
     return jpeg_path
 
 
+def compress_for_x(image_path, max_bytes=5 * 1024 * 1024):
+    if os.path.getsize(image_path) <= max_bytes:
+        return image_path
+
+    from PIL import Image
+    img = Image.open(image_path)
+    out_path = "/tmp/compressed_for_x.jpg"
+    for quality in [85, 70, 55, 40]:
+        img.save(out_path, "JPEG", quality=quality)
+        if os.path.getsize(out_path) <= max_bytes:
+            print("画像を圧縮しました (quality=" + str(quality) + ")")
+            return out_path
+    w, h = img.size
+    img = img.resize((w // 2, h // 2))
+    img.save(out_path, "JPEG", quality=85)
+    print("画像をリサイズして圧縮しました")
+    return out_path
+
+
 def upload_to_folder(local_path, folder_id, creds):
     file_name = os.path.basename(local_path)
     ext = file_name.split(".")[-1].lower()
@@ -218,6 +237,7 @@ def main():
 
     local_path, file_id = result
     local_path = convert_to_jpeg(local_path)
+    local_path = compress_for_x(local_path)
     file_name = os.path.basename(local_path)
 
     caption = generate_caption(local_path)
