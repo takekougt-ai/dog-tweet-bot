@@ -90,17 +90,16 @@ def compress_for_x(image_path, max_bytes=5 * 1024 * 1024):
 
     from PIL import Image
     img = Image.open(image_path)
-    out_path = "/tmp/compressed_for_x.jpg"
     for quality in [85, 70, 55, 40]:
-        img.save(out_path, "JPEG", quality=quality)
-        if os.path.getsize(out_path) <= max_bytes:
+        img.save(image_path, "JPEG", quality=quality)
+        if os.path.getsize(image_path) <= max_bytes:
             print("画像を圧縮しました (quality=" + str(quality) + ")")
-            return out_path
+            return image_path
     w, h = img.size
     img = img.resize((w // 2, h // 2))
-    img.save(out_path, "JPEG", quality=85)
+    img.save(image_path, "JPEG", quality=85)
     print("画像をリサイズして圧縮しました")
-    return out_path
+    return image_path
 
 
 def upload_to_folder(local_path, folder_id, creds):
