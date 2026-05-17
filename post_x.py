@@ -49,17 +49,25 @@ def get_drive_client(creds):
 
 
 def download_next_photo(drive):
+    posted_res = drive.files().list(
+        q="'" + DRIVE_POSTED_X_FOLDER_ID + "' in parents and trashed=false",
+        fields="files(name)", pageSize=1000
+    ).execute()
+    posted_basenames = {os.path.splitext(f["name"])[0].lower() for f in posted_res.get("files", [])}
+
     results = drive.files().list(
         q="'" + DRIVE_FOLDER_ID + "' in parents and mimeType contains 'image/' and trashed=false",
-        fields="files(id, name)", pageSize=1, orderBy="createdTime"
+        fields="files(id, name)", pageSize=100, orderBy="createdTime"
     ).execute()
 
-    files = results.get("files", [])
-    if not files:
+    file = next(
+        (f for f in results.get("files", []) if os.path.splitext(f["name"])[0].lower() not in posted_basenames),
+        None
+    )
+    if not file:
         print("投稿できる写真がありません")
         return None
 
-    file = files[0]
     content = drive.files().get_media(fileId=file["id"]).execute()
     local_path = "/tmp/" + file["name"]
     with open(local_path, "wb") as f:
