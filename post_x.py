@@ -218,7 +218,8 @@ def post_to_x(media_id, caption):
         auth=auth,
         json={"text": caption, "media": {"media_ids": [media_id]}}
     )
-    print("投稿レスポンス: " + str(res.status_code))
+    print("投稿レスポンス: " + str(res.status_code), flush=True)
+    print("投稿レスポンス詳細: " + res.text, flush=True)
     res.raise_for_status()
     print("X投稿完了！ ID: " + res.json()["data"]["id"])
 
