@@ -166,11 +166,19 @@ def generate_caption(image_path):
     with open(image_path, "rb") as f:
         image_data = f.read()
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
-        contents=[types.Part.from_bytes(data=image_data, mime_type=mime_type), PROMPT]
-    )
-    return response.text.strip()
+    for attempt in range(5):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=[types.Part.from_bytes(data=image_data, mime_type=mime_type), PROMPT]
+            )
+            return response.text.strip()
+        except Exception as e:
+            if attempt == 4:
+                raise
+            wait = 30 * (2 ** attempt)
+            print(f"Gemini error (attempt {attempt + 1}/5), retrying in {wait}s: {e}")
+            time.sleep(wait)
 
 
 def upload_media(image_path):
