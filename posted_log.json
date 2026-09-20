@@ -164,7 +164,8 @@
     "IMG_2567.jpg",
     "IMG_2563.jpg",
     "IMG_2571.jpg",
-    "IMG_2606.jpg"
+    "IMG_2606.jpg",
+    "IMG_2568.jpg"
   ],
   "history": [
     {
@@ -987,6 +988,11 @@
     {
       "file": "IMG_2606.jpg",
       "posted_at": "2026-09-19T23:44:39.273466",
+      "platform": "threads"
+    },
+    {
+      "file": "IMG_2568.jpg",
+      "posted_at": "2026-09-20T23:40:18.271347",
       "platform": "threads"
     }
   ]
