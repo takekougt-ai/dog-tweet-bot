@@ -47,17 +47,25 @@ def get_drive_client(creds):
 
 
 def download_next_photo(drive):
+    posted_res = drive.files().list(
+        q="'" + DRIVE_POSTED_THREADS_FOLDER_ID + "' in parents and trashed=false",
+        fields="files(name)", pageSize=1000
+    ).execute()
+    posted_basenames = {os.path.splitext(f["name"])[0].lower() for f in posted_res.get("files", [])}
+
     results = drive.files().list(
         q="'" + DRIVE_FOLDER_ID + "' in parents and mimeType contains 'image/' and trashed=false",
-        fields="files(id, name)", pageSize=1, orderBy="createdTime"
+        fields="files(id, name)", pageSize=100, orderBy="createdTime"
     ).execute()
 
-    files = results.get("files", [])
-    if not files:
+    file = next(
+        (f for f in results.get("files", []) if os.path.splitext(f["name"])[0].lower() not in posted_basenames),
+        None
+    )
+    if not file:
         print("投稿できる写真がありません")
         return None
 
-    file = files[0]
     content = drive.files().get_media(fileId=file["id"]).execute()
     local_path = "/tmp/" + file["name"]
     with open(local_path, "wb") as f:
@@ -179,6 +187,7 @@ def post_to_threads(image_url, caption):
         "https://graph.threads.net/v1.0/me",
         params={"fields": "id", "access_token": token}
     )
+    print("Threads /me レスポンス: " + str(me_res.status_code) + " " + me_res.text, flush=True)
     me_res.raise_for_status()
     user_id = me_res.json()["id"]
 
